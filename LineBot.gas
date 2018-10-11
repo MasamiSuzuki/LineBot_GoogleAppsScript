@@ -1,0 +1,208 @@
+var lineAccessToken = 'line access token';
+var spreadSheetId = 'google spread sheet id';
+var flgPosition = 'flg position at google spread';
+var coupleDay = "first date anniversary";
+var marriageDay = "wedding anniversary
+";
+var purchasedType = {
+  normal : 0,
+  bought : 1,
+  wanted : 2,
+};
+
+function sendMessage(token, messages) {
+  var url = 'https://api.line.me/v2/bot/message/reply';
+  UrlFetchApp.fetch(url, {
+    'headers': {
+      'Content-Type': 'application/json; charset=UTF-8',
+      'Authorization': 'Bearer ' + lineAccessToken,
+    },
+    'method': 'post',
+    'payload': JSON.stringify({
+      'replyToken': token,
+      'messages': [{
+        'type': 'text',
+        'text': messages,
+      }],
+    }),
+  });
+  
+  return ContentService.createTextOutput(JSON.stringify({'content': 'post ok'})).setMimeType(ContentService.MimeType.JSON);
+}
+
+
+function doPost(e) {
+  var reply_token= JSON.parse(e.postData.contents).events[0].replyToken;
+  if(typeof reply_token === 'undefined') {
+    return;
+  }
+ 
+  var message_type = JSON.parse(e.postData.contents).events[0].message.type;
+  if(message_type != "text") {
+    return;
+  }
+  
+  var ss = SpreadsheetApp.openById(spreadSheetId);
+  var message = JSON.parse(e.postData.contents).events[0].message.text;
+  var flag = ss.getRange(flgPosition).getValue();
+  var reply_messages;
+  
+  switch(flag) {
+    case purchasedType.bought:
+      reply_messages = set_item_purchased(message, ss);
+      break;
+    case purchasedType.wanted:
+      reply_messages = set_item_purchase_list(message, ss);
+      break;
+    default:
+      reply_messages = command_purchase(message, ss, flag);
+      break;
+  }
+  return sendMessage(reply_token, reply_messages);
+}
+
+
+function command_purchase(message, ss, flag) {
+  switch(String(message)) {
+    case '買い物リスト':
+      return get_purchase_list(ss);
+      break;
+    case '買ったよ':
+      return getBoughtMessage(ss);
+      break;
+    case '欲しい':
+      ss.getRange(flgPosition).setValue(purchasedType.wanted);
+      return　'何が欲しいの？';
+      break;
+    case 'ゴミの日':
+      return　'◆可燃ごみ\n毎週 月曜日　木曜日\n◆不燃ごみ\n第2水曜日 第4水曜日\n◆古紙・ペットボトル\n毎週 水曜日\n◆びん・かん・プラスチック\n毎週 土曜日';
+      break;
+    case '記念日':
+      return　getCuppleDay() + '\n\n' + getMarriageDay();
+      break;
+    case 'ヘルプ':
+      return　getHelpText();
+      break;
+    default:
+      return getHelpText();
+      break;
+  }
+}
+
+
+function getCuppleDay() {
+  return coupleDay + "に\n付き合って今日は\n" + getDiff(coupleDay) + "日目です！";
+}
+
+function getMarriageDay() {
+  return marriageDay + "に\n結婚して今日は\n" + getDiff(marriageDay) + "日目です！";
+}
+
+function getDiff(dateStr) {
+  var date1 = new Date(dateStr);
+  var date2 = new Date();
+  var msDiff = date2.getTime() - date1.getTime();
+  // 求めた差分（ミリ秒）を日付へ変換します（経過ミリ秒÷(1000ミリ秒×60秒×60分×24時間)。端数切り捨て）
+  var daysDiff = Math.floor(msDiff / (1000 * 60 * 60 *24));
+  // 差分へ1日分加算して返却します
+  return ++daysDiff;
+}
+
+
+function getBoughtMessage(ss) {
+  var lastRow = ss.getLastRow();
+  var items = ss.getRange('A1:A' + lastRow).getValues();
+  if (items < 1 || items == '') {
+    return '登録されている品目はないよ！\n欲しいものがあったら「欲しい」で教えてね！';
+  }
+  
+  ss.getRange(flgPosition).setValue(purchasedType.bought);
+  return　'何を買ってくれたの？';
+}
+
+function getHelpText() {
+  return '◆買い物\n買い物リスト\n買ったよ\n欲しい\n品目は改行で複数登録出来るよ\n◆ゴミの日確認\nゴミの日\n◆記念日の確認\n記念日\n◆ヘルプ\nヘルプ\n\n確認したい項目の言葉で話しかけてね';
+}
+
+
+function set_item_purchase_list(items, ss) {
+  ss.getRange(flgPosition).setValue(purchasedType.normal);
+  
+  var lastRow = ss.getLastRow() + 1;
+  
+  // 改行があったら分割して登録
+  if( items.match(/[\n\r]/g) ) {
+    var item = items.split(/\r\n|\r|\n/);
+    for (i = 0; i < item.length; i++) {
+      ss.setActiveCell('A' + lastRow).setValue(item[i]);
+      lastRow = lastRow + 1;
+    }
+  }
+  else{
+    ss.setActiveCell('A' + lastRow).setValue(items);
+  }
+  
+  return '買い物リストに追加しておいたよ！\nリストの内容を見るには「買い物リスト」って言ってね';
+}
+
+
+function get_purchase_list(ss) {
+  ss.getRange(flgPosition).setValue(0);
+  var lastRow = ss.getLastRow();
+  var items = ss.getRange('A1:A' + lastRow).getValues();
+  
+  if (items.length < 1 || items == '') {
+    return '登録されている品目はないよ！\n欲しいものがあったら「欲しい」で教えてね！';
+  }
+  
+  var text = '買い物リストには、以下の品目が登録されてるよ！\n';
+  items.forEach(function(item) {
+    text += String(item) + '\n';
+  });
+  text += '\n買い出しが終わったら「買ったよ」で教えてね！';
+  
+  return text;
+}
+
+
+function set_item_purchased(purchased_items, ss) {
+  ss.getRange(flgPosition).setValue(0);
+  
+  var lastRow = ss.getLastRow();
+  var items = ss.getRange('A1:A' + lastRow).getValues();
+  if (items.length < 1 || items == '') {
+    return '登録されている品目はないよ！\n欲しいものがあったら「欲しい」で教えてね！';
+  }
+  
+  var cnt = 0;
+  // 改行があったら分割
+  if( purchased_items.match(/[\n\r]/g) ){
+    var item = purchased_items.split(/\r\n|\r|\n/);
+    for (j = 0; j < item.length; j++) {
+      cnt += deleteItem(ss, item[j], lastRow);
+    }
+  }
+  else{
+    cnt += deleteItem(ss, purchased_items, lastRow);
+  }
+  
+  if (cnt == 0){
+    return '該当品目がリストに無いよ！\n「買い物リスト」でリストにある品目を確認してね';
+  }
+  else{
+    return cnt + '品目をリストから削除したよ！\n「買い物リスト」で確認してね！';
+  }
+}
+
+
+function deleteItem(ss, items, lastRow) {
+  var cnt = 0;
+  for(var i = 1; i <= lastRow; i++) {
+    if(items == ss.getRange('A'+ i).getValue()) {
+      ss.deleteRow(i);
+      cnt += 1;
+    }
+  }
+  
+  return cnt;
+}
